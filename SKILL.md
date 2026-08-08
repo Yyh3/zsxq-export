@@ -78,7 +78,22 @@ Comment text...
 > **王五** (2024-01-16 10:00:00): Reply text...
 ```
 
-Incremental progress is tracked in `.zsxq_progress.json` inside the output directory — stores all exported topic IDs so next run stops at known content.
+Incremental progress is tracked in `.zsxq_progress.json` inside the output directory — stores all exported topic IDs and a `resume_end_time` checkpoint so interrupted runs continue from where they stopped.
+
+## Large Circles & Anti-Crawling
+
+For circles with thousands of topics (e.g. 8000+), the zsxq anti-crawling system triggers periodically (~every 200 topics). The script handles this with:
+
+- **Retry logic**: On API error, waits 10s/20s and retries up to 3 times.
+- **Resume checkpoint**: Saves `resume_end_time` (oldest topic's `create_time`) in progress file. Re-running the export starts directly from that point — no re-fetching known pages.
+- **Rate limit**: 3 seconds between API calls to reduce block frequency.
+
+For a circle with 8000+ topics, expect **multiple export runs** (each run fetches ~200-400 topics before a block). Simply re-run the same command; it resumes automatically. Total time: ~6-8 hours for a full archive.
+
+```bash
+# Re-run to continue from last checkpoint (automatic resume)
+python scripts/zsxq_export.py export --group-id 123456 --output D:/知识星球/某圈子
+```
 
 ## Prerequisites
 

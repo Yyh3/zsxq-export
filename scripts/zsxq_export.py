@@ -33,7 +33,7 @@ import requests
 
 DEFAULT_STATE_FILE = "zsxq_auth.json"
 DEFAULT_OUTPUT_DIR = "."
-RATE_LIMIT_DELAY = 1.0
+RATE_LIMIT_DELAY = 3.0  # seconds between API calls (increased to avoid anti-crawling)
 MAX_RETRIES = 3
 PAGE_SIZE = 20
 
@@ -425,6 +425,7 @@ class ZsxqClient:
 
         Returns (topics, next_end_time).
         Pagination uses ISO-format end_time from the last topic's create_time.
+        Retries on API errors to handle transient anti-crawling blocks.
         """
         params = {"count": PAGE_SIZE}
         if end_time:
@@ -432,18 +433,29 @@ class ZsxqClient:
         if scope and scope != "all":
             params["scope"] = scope
 
-        data = self._get(f"/groups/{group_id}/topics", params=params)
-        if data.get("succeeded"):
-            resp_data = data.get("resp_data", {})
-            topics = resp_data.get("topics", [])
-            next_end_time = resp_data.get("end_time")
+        # Retry up to 3 times on API errors (anti-crawling blocks are transient)
+        for attempt in range(3):
+            data = self._get(f"/groups/{group_id}/topics", params=params)
+            if data.get("succeeded"):
+                resp_data = data.get("resp_data", {})
+                topics = resp_data.get("topics", [])
+                next_end_time = resp_data.get("end_time")
 
-            # Fallback: use last topic's create_time for pagination
-            if not next_end_time and topics:
-                last_topic = topics[-1]
-                next_end_time = last_topic.get("create_time")
+                # Fallback: use last topic's create_time for pagination
+                if not next_end_time and topics:
+                    last_topic = topics[-1]
+                    next_end_time = last_topic.get("create_time")
 
-            return topics, next_end_time
+                return topics, next_end_time
+
+            # API returned error — wait and retry
+            if attempt < 2:
+                wait = 10 * (attempt + 1)
+                print(f"  [WARN] Topics API error, retrying in {wait}s... (attempt {attempt + 1}/3)")
+                time.sleep(wait)
+
+        # All retries exhausted
+        print("  [ERROR] Topics API failed after 3 retries. Stopping pagination.")
         return [], None
 
     def fetch_comments(self, topic_id: int) -> list:
@@ -502,6 +514,7 @@ class TopicExporter:
             "last_export_time": None,
             "total_exported": 0,
             "group_id": None,
+            "resume_end_time": None,
         }
 
     def save_progress(self, progress: dict):
@@ -541,11 +554,15 @@ class TopicExporter:
             images_dir = self.output_dir / "images"
             images_dir.mkdir(exist_ok=True)
 
-        end_time = None
+        # Resume from where we left off (skip re-fetching known pages)
+        end_time = progress.get("resume_end_time")
+        if end_time:
+            print(f"Resuming from end_time: {end_time}")
         new_count = 0
         total_fetched = 0
         page = 0
         comments_blocked = False  # Track if comments API is blocked
+        oldest_create_time = None  # Track the oldest topic we've seen this run
 
         print(f"Starting export for group {group_id}...")
         if incremental:
@@ -600,6 +617,11 @@ class TopicExporter:
                 new_count += 1
                 total_fetched += 1
 
+                # Track oldest create_time for resume
+                topic_ct = topic.get("create_time")
+                if topic_ct and (oldest_create_time is None or topic_ct < oldest_create_time):
+                    oldest_create_time = topic_ct
+
                 title_preview = get_topic_title(topic)[:40]
                 print(f"  [{total_fetched}] Saved: {filename}")
                 print(f"      {title_preview}")
@@ -624,6 +646,9 @@ class TopicExporter:
         # Save progress
         progress["exported_topic_ids"] = list(exported_ids)
         progress["total_exported"] = len(exported_ids)
+        # Save resume point: the oldest create_time we've reached
+        if oldest_create_time:
+            progress["resume_end_time"] = oldest_create_time
         self.save_progress(progress)
 
         print(f"\n{'=' * 50}")
