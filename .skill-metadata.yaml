@@ -1,0 +1,52 @@
+examples:
+  - id: login
+    title:
+      zh: 扫码登录知识星球
+      en: Login to zsxq via QR scan
+    description:
+      zh: 打开浏览器扫码登录，保存认证信息供后续导出使用
+      en: Opens browser for QR login, saves auth state for export
+    prompt:
+      zh: |-
+        请帮我登录知识星球，扫码后保存认证信息到 D:\知识星球\zsxq_auth.json
+      en: |-
+        Login to zsxq via QR scan, save auth state to D:\知识星球\zsxq_auth.json
+
+  - id: list-groups
+    title:
+      zh: 列出我的知识星球圈子
+      en: List my zsxq circles
+    description:
+      zh: 查看已加入的所有圈子，获取圈子ID用于后续导出
+      en: Show all joined circles with IDs for export
+    prompt:
+      zh: |-
+        帮我列出所有知识星球圈子，用 D:\知识星球\zsxq_auth.json 认证
+      en: |-
+        List all my zsxq circles using auth at D:\知识星球\zsxq_auth.json
+
+  - id: full-export
+    title:
+      zh: 全量导出圈子内容
+      en: Full export of circle content
+    description:
+      zh: 把某个圈子的全部帖子、问答、评论导出为本地 Markdown 文件
+      en: Export all topics, Q&A, and comments from a circle to local Markdown
+    prompt:
+      zh: |-
+        导出知识星球圈子 {{圈子ID}} 的全部内容到 {{输出目录}}，包括帖子、问答和评论。用 D:\知识星球\zsxq_auth.json 认证。
+      en: |-
+        Export all content from zsxq circle {{circle ID}} to {{output directory}}, including posts, Q&A, and comments. Auth at D:\知识星球\zsxq_auth.json.
+
+  - id: incremental-export
+    title:
+      zh: 增量同步新内容
+      en: Incremental sync of new content
+    description:
+      zh: 只导出上次以来的新增帖子，适合定期更新
+      en: Export only new topics since last run, for periodic updates
+    prompt:
+      zh: |-
+        增量导出知识星球圈子 {{圈子ID}} 的新增内容到 {{输出目录}}，只拉新帖子。用 D:\知识星球\zsxq_auth.json 认证。
+      en: |-
+        Incremental export of new topics from zsxq circle {{circle ID}} to {{output directory}}. Auth at D:\知识星球\zsxq_auth.json.
