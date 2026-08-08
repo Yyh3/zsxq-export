@@ -87,11 +87,14 @@ def format_time_iso(raw: str) -> str:
 
 def sanitize_filename(name: str, max_len: int = 50) -> str:
     """Make a string safe for use as a filename."""
-    name = re.sub(r'[\\/:*?"<>|\n\r\t]', "_", name)
+    # Replace OS-reserved chars + zsxq common chars (#, full-width punctuation)
+    name = re.sub(r'[\\/:*?"<>|\n\r\t#？：]', "_", name)
+    name = re.sub(r"_+", "_", name)  # collapse repeated underscores
     name = re.sub(r"\s+", " ", name).strip()
+    name = name.strip("_. ")
     if len(name) > max_len:
-        name = name[:max_len]
-    return name
+        name = name[:max_len].strip("_. ")
+    return name or "untitled"
 
 
 def clean_zsxq_text(text: str) -> str:
@@ -369,8 +372,11 @@ class ZsxqClient:
             "x-version": saved_headers.get("x-version", "2.95.0"),
         })
 
-    def _get(self, path: str, params: dict = None) -> dict:
-        """Make a GET request to the zsxq v2 API."""
+    def _get(self, path: str, params: dict = None, quiet: bool = False) -> dict:
+        """Make a GET request to the zsxq v2 API.
+
+        When quiet=True, suppress warnings for known anti-crawling errors.
+        """
         url = self.api_base.rstrip("/") + path
         for attempt in range(MAX_RETRIES):
             try:
@@ -392,7 +398,9 @@ class ZsxqClient:
                 data = resp.json()
                 if not data.get("succeeded"):
                     err = data.get("resp_err") or data.get("info") or str(data)[:200]
-                    print(f"  [WARN] API error: {err}")
+                    # Suppress noise for known anti-crawling errors
+                    if not quiet:
+                        print(f"  [WARN] API error: {err}")
                 time.sleep(RATE_LIMIT_DELAY)
                 return data
 
@@ -439,7 +447,10 @@ class ZsxqClient:
         return [], None
 
     def fetch_comments(self, topic_id: int) -> list:
-        """Fetch all comments for a topic (with pagination)."""
+        """Fetch all comments for a topic (with pagination).
+
+        Returns empty list if comments API is blocked by anti-crawling.
+        """
         all_comments = []
         end_time = None
 
@@ -448,7 +459,7 @@ class ZsxqClient:
             if end_time:
                 params["end_time"] = end_time
 
-            data = self._get(f"/topics/{topic_id}/comments", params=params)
+            data = self._get(f"/topics/{topic_id}/comments", params=params, quiet=True)
             if data.get("succeeded"):
                 resp_data = data.get("resp_data", {})
                 comments = resp_data.get("comments", [])
@@ -464,6 +475,7 @@ class ZsxqClient:
                         break
                 end_time = next_end_time
             else:
+                # API returned error (likely anti-crawling block)
                 break
 
         return all_comments
@@ -533,6 +545,7 @@ class TopicExporter:
         new_count = 0
         total_fetched = 0
         page = 0
+        comments_blocked = False  # Track if comments API is blocked
 
         print(f"Starting export for group {group_id}...")
         if incremental:
@@ -556,7 +569,7 @@ class TopicExporter:
             for topic in topics:
                 topic_id = topic.get("topic_id")
 
-                # Check if already exported (incremental stop)
+                # Skip duplicates (pagination boundary overlap)
                 if topic_id and topic_id in exported_ids:
                     if incremental:
                         print(f"  Hit known topic {topic_id}, incremental stop.")
@@ -564,12 +577,16 @@ class TopicExporter:
                         break
                     continue
 
-                # Fetch comments if the topic has any
+                # Fetch comments if the topic has any (skip if blocked)
                 comments = []
                 comments_count = topic.get("comments_count", 0) or 0
-                if comments_count > 0:
+                if comments_count > 0 and not comments_blocked:
                     try:
                         comments = self.client.fetch_comments(topic_id)
+                        if not comments:
+                            # First failed fetch — likely anti-crawling block
+                            comments_blocked = True
+                            print("  [INFO] Comments API blocked by zsxq, skipping comments for remaining topics.")
                     except Exception as e:
                         print(f"  [WARN] Failed to fetch comments for {topic_id}: {e}")
 
