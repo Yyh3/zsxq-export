@@ -554,10 +554,17 @@ class TopicExporter:
             images_dir = self.output_dir / "images"
             images_dir.mkdir(exist_ok=True)
 
-        # Resume from where we left off (skip re-fetching known pages)
-        end_time = progress.get("resume_end_time")
-        if end_time:
-            print(f"Resuming from end_time: {end_time}")
+        # Start point for pagination:
+        # - Incremental (fetch NEW posts): start from newest (end_time=None),
+        #   stop when hitting already-exported topics.
+        # - Non-incremental (continue backward crawl): resume from the oldest
+        #   create_time reached in a previous run.
+        if incremental:
+            end_time = None
+        else:
+            end_time = progress.get("resume_end_time")
+            if end_time:
+                print(f"Resuming backward crawl from end_time: {end_time}")
         new_count = 0
         total_fetched = 0
         page = 0
@@ -646,8 +653,10 @@ class TopicExporter:
         # Save progress
         progress["exported_topic_ids"] = list(exported_ids)
         progress["total_exported"] = len(exported_ids)
-        # Save resume point: the oldest create_time we've reached
-        if oldest_create_time:
+        # Save resume point only for backward crawls. In incremental mode we
+        # fetch NEW posts at the top, so must NOT overwrite the oldest-point
+        # checkpoint with a much newer date.
+        if oldest_create_time and not incremental:
             progress["resume_end_time"] = oldest_create_time
         self.save_progress(progress)
 
